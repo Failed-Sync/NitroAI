@@ -11,6 +11,21 @@ import type {
   QuizAttempt,
   QuizQuestion,
 } from "../types";
+import { idbStore } from "./idb";
+import { memoryStore } from "./memory";
+
+export { idbStore } from "./idb";
+export { memoryStore } from "./memory";
+
+/* Default store loader: returns IndexedDB store if available, falls back to
+   in-memory store (e.g. in tests/non-IDB environments). */
+export async function openStore(name?: string): Promise<Store> {
+  try {
+    return await idbStore(name);
+  } catch {
+    return memoryStore();
+  }
+}
 
 /* Collections keyed by id. `by` fields enable cheap filtered reads. */
 export interface Store {

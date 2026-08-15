@@ -11,9 +11,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Repo } from "./db";
-import { idbStore } from "./db/idb";
-import { memoryStore } from "./db/memory";
+import { Repo, openStore } from "./db";
 import { createEngine } from "./engine";
 import type { Engine } from "./engine/types";
 import { resilient } from "./engine/resilient";
@@ -25,13 +23,7 @@ import { reconcileJobs } from "./generation/pipeline";
 let repoPromise: Promise<Repo> | null = null;
 export function getRepo(): Promise<Repo> {
   if (!repoPromise) {
-    repoPromise = (async () => {
-      try {
-        return new Repo(await idbStore());
-      } catch {
-        return new Repo(memoryStore());
-      }
-    })();
+    repoPromise = openStore().then((store) => new Repo(store));
   }
   return repoPromise;
 }

@@ -31,6 +31,8 @@ function binDir() {
   return path.join(app.getPath("userData"), "bin");
 }
 
+const DEFAULT_PORT = Number(process.env.PORT) || 4180;
+
 async function ensureServer() {
   if (serverInfo) {
     try {
@@ -50,7 +52,7 @@ async function ensureServer() {
     distDir: path.join(__dirname, "..", "dist"),
     binDir: binDir(),
     host: "127.0.0.1",
-    port: 0, // OS-assigned free port; avoids clashes with anything on 4173 etc.
+    port: DEFAULT_PORT,
   });
   return serverInfo;
 }
