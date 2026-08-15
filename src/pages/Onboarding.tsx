@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertCircle, Cloud, Cpu, KeyRound, PenLine } from "lucide-react";
+import { Cloud, Cpu, KeyRound, PenLine } from "lucide-react";
 import { detectProvider, saveApiKey } from "../lib/engine/keys";
 import { getEnginePrefs } from "../lib/prefs";
-import { getAvailableModels, getOllamaStatus } from "../services/ollama";
+import { localSetupStatus } from "../lib/localSetup";
+import LocalSetupModal from "../components/LocalSetupModal";
 import { useApp } from "../lib/app";
 import type { EngineMode } from "../lib/types";
 
@@ -14,7 +15,7 @@ export default function Onboarding() {
   const [mode, setMode] = useState<EngineMode | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [setupOpen, setSetupOpen] = useState(false);
   const provider = detectProvider(apiKey.trim());
   const ready = mode === "local" || (mode === "cloud" && provider !== null);
 
@@ -24,6 +25,9 @@ export default function Onboarding() {
       ...prefs,
       mode: nextMode,
       onboarded: true,
+      // Persist which local model is actually in use, so future launches (and
+      // the "is setup already done" check below) respect it instead of only
+      // ever recognizing the hardcoded default.
       localModel: chatModel ?? prefs.localModel,
     });
     navigate("/", { replace: true });
@@ -32,35 +36,24 @@ export default function Onboarding() {
   async function finish() {
     if (!mode || busy) return;
     setBusy(true);
-    setError(null);
-
     if (mode === "cloud") {
       await saveApiKey(apiKey.trim());
       enter("cloud");
-      setBusy(false);
       return;
     }
-
-    // Local mode: detect local Ollama instance without forcing downloads
-    const status = await getOllamaStatus();
-    if (!status.running) {
-      setError(status.error || "Ollama not detected. Install and start Ollama from https://ollama.com");
-      setBusy(false);
-      return;
-    }
-
-    const available = status.models.length > 0 ? status.models : await getAvailableModels();
+    // Local: provision Ollama first IF a setup server is present and not already
+    // ready. On a static/dev host with no server, proceed and let the engine
+    // use a manually-running Ollama. Check against any model the user already
+    // chose/pulled before (not just our default) so a returning user isn't
+    // asked to download again.
     const prefs = getEnginePrefs();
-    let chosenModel = prefs.localModel;
-
-    if (available.length > 0) {
-      if (!chosenModel || !available.includes(chosenModel)) {
-        chosenModel = available[0];
-      }
+    const status = await localSetupStatus({ chatModel: prefs.localModel || undefined });
+    const alreadyReady = status?.serving && status.hasChatModel && status.hasEmbedModel;
+    if (status && !alreadyReady) {
+      setSetupOpen(true);
+      return;
     }
-
-    enter("local", chosenModel || undefined);
-    setBusy(false);
+    enter("local");
   }
 
   return (
@@ -80,20 +73,14 @@ export default function Onboarding() {
       <div className="mt-10 grid w-full max-w-3xl gap-4 md:grid-cols-2">
         <ModeCard
           active={mode === "local"}
-          onClick={() => {
-            setMode("local");
-            setError(null);
-          }}
+          onClick={() => setMode("local")}
           icon={Cpu}
           title="Fully local"
-          body="Everything runs on this device via your local Ollama instance — private, offline, zero cost. Connects directly to Ollama running on your machine."
+          body="Everything runs on this device — private, offline, zero cost. Best for privacy; long lectures and quiz distractors are a little weaker than cloud. Downloads models on first use."
         />
         <ModeCard
           active={mode === "cloud"}
-          onClick={() => {
-            setMode("cloud");
-            setError(null);
-          }}
+          onClick={() => setMode("cloud")}
           icon={Cloud}
           title="Bring your own key"
           body="Use your OpenAI or Anthropic key for the highest-quality notes, quizzes, chat, and voices. You pay your provider directly — no NitroAI subscription, ever."
@@ -124,18 +111,6 @@ export default function Onboarding() {
         </div>
       )}
 
-      {error && mode === "local" && (
-        <div className="mt-6 flex w-full max-w-3xl items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900 shadow-soft dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">
-          <AlertCircle className="size-5 shrink-0 text-red-600 dark:text-red-400" />
-          <div>
-            <p className="font-semibold">{error}</p>
-            <p className="mt-1 text-xs text-red-700 dark:text-red-300">
-              Make sure Ollama is installed and running on <code>localhost:11434</code>, then click <strong>Get started</strong> again.
-            </p>
-          </div>
-        </div>
-      )}
-
       <button
         onClick={finish}
         disabled={!ready || busy}
@@ -145,8 +120,20 @@ export default function Onboarding() {
             : "cursor-not-allowed bg-accent-softer text-ink-faint"
         }`}
       >
-        {busy ? "Connecting…" : "Get started"}
+        {busy ? "Setting up…" : "Get started"}
       </button>
+
+      {setupOpen && (
+        <LocalSetupModal
+          models={{ chatModel: getEnginePrefs().localModel || undefined }}
+          onDone={(chatModel) => enter("local", chatModel)}
+          onCancel={() => {
+            setSetupOpen(false);
+            setBusy(false);
+            setMode("cloud");
+          }}
+        />
+      )}
     </div>
   );
 }
